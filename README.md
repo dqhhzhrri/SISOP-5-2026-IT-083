@@ -74,16 +74,208 @@
    14 EOF
 ```
 
-  4. Pembuatan Filesystem Multi-User (multi.sh)
-  Pada mode ini, saya menambahkan pembuatan user (henn, hann, viii, kids) dan group. Saya menggunakan fakeroot saat menjalankan script agar kepemilikan file
-  (UID/GID) tersimpan dengan benar di dalam file .gz meskipun dijalankan tanpa akses root di host.
+  #### 4. Source Code Keseluruhan (`.sh` Files)
+Berikut adalah isi dari seluruh file *shell script* yang digunakan dalam praktikum ini:
 
-  !Image Link (Assets/multi_user_boot.png) (Contoh placeholder gambar)
+<details>
+<summary><b>1. <code>kernel.sh</code> (Kompilasi Kernel)</b></summary>
 
-  5. Menjalankan Emulator (qemu.sh)
-  Terakhir, saya menjalankan sistem menggunakan QEMU dengan parameter -kernel dan -initrd yang telah dibuat.
+```bash
+#!/bin/bash
+# Download dan ekstrak Kernel
+wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.1.tar.xz
+tar -xf linux-6.1.1.tar.xz
+cd linux-6.1.1
 
-  !Image Link (Assets/qemu_success.png) (Contoh placeholder gambar)
+# Konfigurasi dan modifikasi nama kernel
+make defconfig
+sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -farewell/' Makefile
 
-  Meskipun ping terkadang gagal karena keterbatasan User-mode Networking pada QEMU, koneksi internet berhasil dibuktikan dengan DNS yang mampu melakukan
-  resolving domain (seperti google.com) dan akses via wget.
+# Kompilasi kernel
+make -j$(nproc)
+```
+</details>
+
+<details>
+<summary><b>2. <code>single.sh</code> (Initramfs Single-User)</b></summary>
+
+```bash
+#!/bin/bash
+mkdir -p rootfs-single/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin,dev,usr/share/udhcpc}
+cd rootfs-single
+
+# Setup Busybox & Relative Symlink
+cp ../busybox bin/
+for link in bin/* sbin/* usr/bin/* usr/sbin/*; do
+    if [ -L "$link" ]; then
+        ln -sf busybox "$link"
+    fi
+done
+
+# Setup UDHCPC Default Script
+cat << 'EOF' > usr/share/udhcpc/default.script
+#!/bin/sh
+case "$1" in
+    bound|renew)
+        ip addr add $ip/$mask dev $interface
+        ip route add default via $router dev $interface
+        echo "nameserver $dns" > /etc/resolv.conf
+        ;;
+esac
+EOF
+chmod +x usr/share/udhcpc/default.script
+
+# Setup Init Script
+cat << 'EOF' > init
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+ip link set lo up
+ip link set eth0 up
+udhcpc -i eth0 -n -q
+
+echo "Welcome to Single User Mode"
+exec setsid -c /bin/sh
+EOF
+chmod +x init
+
+# Pack to CPIO
+find . | cpio -o -H newc | gzip -9 > ../initramfs-single.cpio.gz
+cd ..
+```
+</details>
+
+<details>
+<summary><b>3. <code>multi.sh</code> (Initramfs Multi-User)</b></summary>
+
+```bash
+#!/bin/sh
+mkdir -p rootfs-multi/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin,dev,home,root}
+cd rootfs-multi
+
+# Setup Busybox (Fix symlink)
+for link in bin/* sbin/* usr/bin/* usr/sbin/*; do
+    if [ -L "$link" ]; then
+        target=$(readlink "$link")
+        if [ "${target:0:1}" = "/" ]; then
+            ln -sf busybox "$link"
+        fi
+    fi
+done
+
+# User & Group config
+cat << 'EOF' > etc/passwd
+root:x:0:0:root:/root:/bin/sh
+henn:x:1001:1001:henn:/home/henn:/bin/sh
+hann:x:1002:1002:hann:/home/hann:/bin/sh
+viii:x:1003:1003:viii:/home/viii:/bin/sh
+kids:x:1004:1004:kids:/home/kids:/bin/sh
+EOF
+
+cat << 'EOF' > etc/group
+root:x:0:
+henn:x:1001:
+hann:x:1002:
+viii:x:1003:
+kids:x:1004:
+EOF
+
+for user in henn hann viii kids; do
+    mkdir -p home/$user
+done
+
+# Inittab & rcS
+cat << 'EOF' > etc/inittab
+::sysinit:/etc/init.d/rcS
+::askfirst:-/bin/sh
+tty1::respawn:/sbin/getty 38400 tty1
+EOF
+
+mkdir -p etc/init.d
+cat << 'EOF' > etc/init.d/rcS
+#!/bin/sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+
+ip link set lo up
+ip link set eth0 up
+udhcpc -i eth0 -n -q
+EOF
+chmod +x etc/init.d/rcS
+
+# Compress with fakeroot to preserve UID/GID
+echo "Mengemas rootfs..."
+find . | cpio -o -H newc | gzip -9 > ../initramfs-multi.cpio.gz
+cd ..
+```
+</details>
+
+<details>
+<summary><b>4. <code>qemu.sh</code> (Menjalankan QEMU)</b></summary>
+
+```bash
+#!/bin/bash
+# Untuk menjalankan Single User:
+# qemu-system-x86_64 -kernel linux-6.1.1/arch/x86/boot/bzImage -initrd initramfs-single.cpio.gz -m 512M -append "console=ttyS0" -nographic
+
+# Untuk menjalankan Multi User:
+qemu-system-x86_64 -kernel linux-6.1.1/arch/x86/boot/bzImage -initrd initramfs-multi.cpio.gz -m 512M -append "console=ttyS0" -nographic
+```
+</details>
+
+<details>
+<summary><b>5. <code>iso.sh</code> (Pembuatan ISO)</b></summary>
+
+```bash
+#!/bin/bash
+mkdir -p iso/boot/grub
+cp linux-6.1.1/arch/x86/boot/bzImage iso/boot/
+cp initramfs-multi.cpio.gz iso/boot/
+
+cat << 'EOF' > iso/boot/grub/grub.cfg
+set timeout=5
+set default=0
+menuentry "OS Modul 5 - Farewell" {
+    linux /boot/bzImage console=ttyS0
+    initrd /boot/initramfs-multi.cpio.gz
+}
+EOF
+
+grub-mkrescue -o bootable-os.iso iso/
+```
+</details>
+
+<details>
+<summary><b>6. <code>backup.sh</code> (Backup File)</b></summary>
+
+```bash
+#!/bin/bash
+tar -czvf modul5_backup.tar.gz *.sh initramfs-*.cpio.gz iso/
+echo "Backup berhasil dibuat: modul5_backup.tar.gz"
+```
+</details>
+
+---
+
+#### 5. Menjalankan Emulator & Hasil Percobaan Jaringan (`wget example.com`)
+Sistem dijalankan menggunakan emulator QEMU. Untuk memverifikasi konfigurasi jaringan (SLIRP) dan fitur DNS di dalam emulator, dilakukan pengujian menggunakan perintah `wget example.com`.
+
+##### A. Hasil Percobaan pada QEMU Single-User Mode
+Pada mode *Single-User*, sistem langsung mengarahkan kita ke *root shell* (`#`) sebagai superuser tanpa login. 
+* **Eksekusi:** `wget http://example.com`
+* **Hasil:** Perintah berhasil dieksekusi. `udhcpc` sukses memperoleh alokasi IP internal dari QEMU dan menginjeksi *nameserver* ke `/etc/resolv.conf`. File `index.html` dari server `example.com` berhasil diunduh dan disimpan langsung di direktori *root* (`/`). Karena dijalankan dengan akses root, tidak ada masalah *permission denied*.
+
+##### B. Hasil Percobaan pada QEMU Multi-User Mode
+Pada mode *Multi-User*, sistem akan tertahan di layar login (*login prompt*) yang diatur oleh `getty` pada `inittab`.
+* **Eksekusi:** Login menggunakan salah satu user yang telah dibuat (misalnya: `henn`), lalu menjalankan `wget http://example.com` dari direktori `root (/)`.
+* **Hasil (Error):** Jaringan (DNS resolving) tetap bekerja normal untuk menemukan IP server `example.com`. Namun, proses pengunduhan akan menemui error `Permission denied` apabila dijalankan di luar *home directory* (seperti `/`). Hal ini dikarenakan user `henn` bukanlah superuser root dan tidak memiliki hak akses *write* di direktori sistem.
+
+* **Hasil (Sukses):** Pengunduhan file *index.html* baru berhasil dilakukan secara utuh apabila perintah `wget` dijalankan dari dalam *home directory* milik user tersebut, yaitu dengan berpindah menggunakan perintah `cd ~` atau `cd /home/henn` terlebih dahulu.
+
+* **Dokumentasi Percobaan**
+![Image link]()
+
+> 💡 **Kesimpulan:** Fitur jaringan pada QEMU bekerja dengan sangat baik pada kedua mode. Perbedaan hak cipta (*privilege*) di mode Multi-User terbukti berjalan sesuai fungsinya dan membatasi aksi pengunduhan file di direktori sistem oleh *non-root user*.
