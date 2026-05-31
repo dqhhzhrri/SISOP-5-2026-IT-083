@@ -16,7 +16,7 @@
   manajemen symlink pada initramfs, dan konfigurasi jaringan pada emulator QEMU. Bantuan AI sangat krusial dalam mendiagnosa pesan error kernel yang cukup
   kompleks.
 
-  Gemini AI : Link Percakapan (https://gemini.google.com/share/b0347306-9170-42d1-b48d-1ec06b7ecf83) (Ganti dengan link share Anda)
+  Gemini AI : Link Percakapan [Link](https://gemini.google.com/share/7f92166df750)
 
   ## Soal 1
   Pada soal ini, saya menggunakan berbagai perintah dasar dan lanjut seperti make, cpio, wget, fakeroot, sed, dos2unix, dan qemu-system-x86_64.
@@ -35,7 +35,7 @@
   1. Kompilasi Kernel (kernel.sh)
   Pertama, saya mengunduh source code Linux Kernel 6.1.1 dan melakukan konfigurasi menggunakan make defconfig. Saya mengubah nama kernel menggunakan sed
   pada Makefile untuk menambahkan identitas -farewell (Poin 2).
-```sh
+```bash
    1 # Potongan kode modifikasi Makefile
    2 sed -i 's/^EXTRAVERSION =.*/EXTRAVERSION = -farewell/' Makefile
 ```
@@ -44,7 +44,7 @@
   Saya membuat struktur direktori dasar dan mengunduh BusyBox statis. Untuk mengatasi Kernel Panic, saya menambahkan logika untuk mengubah semua absolute
   symlink menjadi relative symlink.
 
-```sh
+```bash
    1 # Solusi agar init ditemukan (Relative Symlink)
    2 for link in bin/*; do
    3     if [ -L "$link" ]; then
@@ -57,7 +57,7 @@
   Untuk mengatasi masalah jaringan, saya membuat file /usr/share/udhcpc/default.script yang berfungsi untuk memasang IP, Route, dan DNS secara otomatis saat
   booting. Saya juga menggunakan setsid -c agar shell mendapatkan akses TTY yang benar.
 
-```sh
+```bash
     1 # Init script dengan fix TTY dan Network
     2 cat << 'EOF' > init
     3 #!/bin/sh
@@ -275,7 +275,10 @@ Pada mode *Multi-User*, sistem akan tertahan di layar login (*login prompt*) yan
 
 * **Hasil (Sukses):** Pengunduhan file *index.html* baru berhasil dilakukan secara utuh apabila perintah `wget` dijalankan dari dalam *home directory* milik user tersebut, yaitu dengan berpindah menggunakan perintah `cd ~` atau `cd /home/henn` terlebih dahulu.
 
-* **Dokumentasi Percobaan**
-![Image link]()
+### **Dokumentasi Percobaan Qemu single**
+![Image link](Assets/Modul5_2.jpg)
 
-> 💡 **Kesimpulan:** Fitur jaringan pada QEMU bekerja dengan sangat baik pada kedua mode. Perbedaan hak cipta (*privilege*) di mode Multi-User terbukti berjalan sesuai fungsinya dan membatasi aksi pengunduhan file di direktori sistem oleh *non-root user*.
+### **Dokumentasi Percobaan Qemu Multi**
+![Image link](Assets/Modul5_2.jpg)
+
+> **Kesimpulan:** Fitur jaringan pada QEMU bekerja dengan sangat baik pada kedua mode. Perbedaan hak cipta (*privilege*) di mode Multi-User terbukti berjalan sesuai fungsinya dan membatasi aksi pengunduhan file di direktori sistem oleh *non-root user*.
